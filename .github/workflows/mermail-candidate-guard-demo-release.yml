@@ -1,0 +1,67 @@
+name: Mermail Candidate Guard Demo Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/mermail-candidate-guard-demo-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out demo branch
+        uses: actions/checkout@v4
+        with:
+          ref: mermail-bounty-demo-video
+
+      - name: Install renderer dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg espeak-ng fonts-dejavu-core
+          python3 -m pip install --quiet --break-system-packages pillow
+
+      - name: Render demo
+        run: python3 demo/render_candidate_guard_demo.py
+
+      - name: Validate exact output
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          import subprocess
+          p='Mermail_Candidate_Submission_Guard_Demo.mp4'
+          d=float(subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration','-of','csv=p=0',p], text=True).strip())
+          if not 120 <= d <= 300:
+              raise SystemExit(f'Duration {d:.2f}s is outside 2–5 minutes')
+          info=subprocess.check_output(['ffprobe','-v','error','-show_entries','format=duration,size,bit_rate:stream=index,codec_name,width,height,r_frame_rate,sample_rate,channels','-of','json',p], text=True)
+          open('demo_ffprobe.json','w').write(info)
+          print(f'Validated {d:.2f}s')
+          PY
+          sha256sum Mermail_Candidate_Submission_Guard_Demo.mp4 | tee SHA256.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mermail-Candidate-Submission-Guard-Demo
+          path: |
+            Mermail_Candidate_Submission_Guard_Demo.mp4
+            SHA256.txt
+            demo_ffprobe.json
+          retention-days: 14
+
+      - name: Publish public release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh release delete mermail-candidate-guard-demo-v1 --yes --cleanup-tag || true
+          gh release create mermail-candidate-guard-demo-v1 \
+            Mermail_Candidate_Submission_Guard_Demo.mp4 \
+            SHA256.txt demo_ffprobe.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --target main \
+            --title "Mermail Candidate Submission Guard — Live Demo" \
+            --notes "English working demo based on the live Mermail MCP run with synthetic data. AI client: ChatGPT + Mermail MCP. Official skill PR: https://github.com/Nudgen-Marketing/mermail-skills/pull/467"
